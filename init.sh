@@ -1,44 +1,80 @@
 LOG_FILE="/var/log/dpkg.log"
 DATA_DIR="./data"
 
+if [[ "$DATA_DIR" ]]; then 
+    echo "Removing current database..."
+    rm -rf "$DATA_DIR/"
+fi
+
 mkdir -p "$DATA_DIR/packages"
 mkdir -p "$DATA_DIR/dates"
+touch "$DATA_DIR/installed.db"
+touch "$DATA_DIR/removed.db"
 
-if [[ ! -f "$DATA_DIR/checkpoint" ]]; then
-    echo "Initializing package database..."
+printf '%s\t%s\t%s\n' "name" "version" "date" \
+        >> "$DATA_DIR/installed.db"
 
-    declare -A packages
-    declare -A dates
+printf '%s\t%s\t%s\n' "name" "date" \
+        >> "$DATA_DIR/removed.db"
 
-    while read -r date time action field4 field5 field6; do
+echo "Initializing package database..."
 
-        if [[ "$action" == "install" ]]; then
-            packages["$field4"]="$field6"
-            dates["$field4"]="$date"
+declare -A packages
+declare -A dates
 
-        elif [[ "$action" == "upgrade" ]]; then
-            packages["$field4"]="$field6"
+while read -r date time action field4 field5 field6; do
+    PACKAGE=""
+    VERSION=""
 
-        elif [[ "$action" == "status" && "$field4" == "installed" ]]; then
-            packages["$field5"]="$field6"
+    if [[ "$action" == "install" ]]; then
+        PACKAGE="$field4"
+        VERSION="$field5"
+        packages["$field4"]="$field6"
+        dates["$field4"]="$date"
 
-        elif [[ "$action" == "remove" || "$action" == "purge" ]]; then
-            unset 'packages[$field4]'
-            unset 'dates[$field4]'
-        fi
+    elif [[ "$action" == "upgrade" ]]; then
+        PACKAGE="$field4"
+        VERSION="$field5"
+        packages["$field4"]="$field6"
 
-    done < "$LOG_FILE"
+    elif [[ "$action" == "status" && "$field4" == "installed" ]]; then
+        PACKAGE="$field5"
+        VERSION="$field6"
+        packages["$field5"]="$field6"
 
-    for package in "${!packages[@]}"; do
-        echo -e "$package\t${packages[$package]}\t${dates[$package]}" >> "$DATA_DIR/installed.db"
-    done
+    elif [[ "$action" == "remove" || "$action" == "purge" ]]; then
+        PACKAGE="$field4"
+        VERSION="$field5"
+        unset 'packages[$PACKAGE]'
+        unset 'dates[$PACKAGE]'
+        printf '%s\t%s\t%s\n' "$PACKAGE" "$date" \
+            >> "$DATA_DIR/removed.db"
+    fi
 
-    wc -c < "$LOG_FILE" > "$DATA_DIR/checkpoint"
+    [[ -z "$PACKAGE" ]] && continue
 
-    echo "Initialization complete!"
-else
-    echo "Database already initialized."
-fi
+    if [[ ! -f "$DATA_DIR"/packages/"$PACKAGE".log ]]; then
+        touch "$DATA_DIR"/packages/"$PACKAGE".log
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$date" "$time" "$action" "$VERSION" \
+        >> "$DATA_DIR"/packages/"$PACKAGE".log
+
+    if [[ ! -f "$DATA_DIR"/dates/"$date" ]]; then
+        touch "$DATA_DIR"/dates/"$date".log
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$date" "$time" "$action" "$VERSION" \
+        >> "$DATA_DIR"/dates/"$date".log
+
+done < "$LOG_FILE"
+
+for package in "${!packages[@]}"; do
+    echo -e "$package\t${packages[$package]}\t${dates[$package]}" >> "$DATA_DIR/installed.db"
+done
+
+wc -c < "$LOG_FILE" > "$DATA_DIR/checkpoint"
+
+echo "Initialization complete!"
+
 
 echo "Starting monitor..."
 ./monitor.sh

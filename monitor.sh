@@ -22,7 +22,8 @@ CURRENT_SIZE=$(wc -c < "$LOG_FILE")
 
 if (( CURRENT_SIZE < OFFSET )); then
     echo "Log rotation detected. Reinitialization required."
-    exit 1
+    ./init.sh
+    exit 0
 fi
 
 tail -c +$((OFFSET + 1)) "$LOG_FILE" |
